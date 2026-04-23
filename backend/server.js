@@ -18,9 +18,6 @@ app.use((req, res, next) => {
   next();
 });
 
-connectDB();
-startSerial();
-
 app.use("/api", sensorRoutes);
 
 // API key endpoint for frontend
@@ -30,4 +27,15 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-app.listen(5000, () => console.log("Backend running on port 5000"));
+const startServer = async () => {
+  try {
+    await connectDB();
+    startSerial();
+    app.listen(5000, () => console.log("Backend running on port 5000"));
+  } catch (err) {
+    console.error("Backend startup failed:", err.message);
+    process.exit(1);
+  }
+};
+
+startServer();
