@@ -1,11 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MdMap, MdLocationOn, MdTerrain, MdWater, MdVibration, MdGpsFixed, MdGpsNotFixed } from "react-icons/md";
 import { RISK_CONFIG } from "../components/chartConfig.js";
+import axios from "axios";
 
 // 📍 Default location (change to your actual monitoring site)
 const DEFAULT_LOCATION = { lat: -1.9441, lng: 30.0619, label: "Kigali, Rwanda" };
 
 export default function ZoneMap({ risk, latest }) {
+  const [apiKey, setApiKey] = useState("");
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerRef = useRef(null);
+
   const cfg = RISK_CONFIG[risk.risk] || RISK_CONFIG.LOW;
 
   // Use GPS from latest reading if available, else default
@@ -13,7 +19,104 @@ export default function ZoneMap({ risk, latest }) {
   const lng = latest?.lng ?? DEFAULT_LOCATION.lng;
   const hasGPS = !!(latest?.lat && latest?.lng);
 
-  const mapSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01},${lat-0.01},${lng+0.01},${lat+0.01}&layer=mapnik&marker=${lat},${lng}`;
+  // Fetch API key from backend
+  useEffect(() => {
+    axios.get("http://localhost:5000/api/config")
+      .then((res) => setApiKey(res.data.googleMapsApiKey || ""))
+      .catch(() => {});
+  }, []);
+
+  // Load Google Maps script and initialize map
+  useEffect(() => {
+    if (!apiKey) return;
+
+    // Check if Google Maps is already loaded
+    if (window.google && window.google.maps) {
+      initMap();
+      return;
+    }
+
+    // Load Google Maps script
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
+    script.async = true;
+    script.defer = true;
+    script.onload = initMap;
+    document.head.appendChild(script);
+
+    return () => {
+      // Cleanup map instance on unmount
+      if (mapInstanceRef.current) {
+        google.maps.event.clearInstanceListeners(mapInstanceRef.current);
+        mapInstanceRef.current = null;
+      }
+    };
+  }, [apiKey]);
+
+  const initMap = () => {
+    if (!mapRef.current || !window.google) return;
+
+    // If map already exists, just update marker
+    if (mapInstanceRef.current) {
+      updateMarker();
+      return;
+    }
+
+    const mapOptions = {
+      center: { lat, lng },
+      zoom: 15,
+      styles: [
+        { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
+      ],
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: true,
+    };
+
+    mapInstanceRef.current = new google.maps.Map(mapRef.current, mapOptions);
+    updateMarker();
+  };
+
+  const updateMarker = () => {
+    if (!mapInstanceRef.current || !window.google) return;
+
+    // Remove existing marker
+    if (markerRef.current) {
+      markerRef.current.setMap(null);
+    }
+
+    // Create custom marker based on risk level
+    const markerColor = risk.risk === "CRITICAL" ? "#ef4444" :
+                        risk.risk === "HIGH" ? "#f97316" :
+                        risk.risk === "MEDIUM" ? "#eab308" : "#22c55e";
+
+    markerRef.current = new google.maps.Marker({
+      position: { lat, lng },
+      map: mapInstanceRef.current,
+      title: `Risk: ${risk.risk} (Score: ${risk.riskScore})`,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 12,
+        fillColor: markerColor,
+        fillOpacity: 0.8,
+        strokeColor: "#ffffff",
+        strokeWeight: 3,
+      },
+      animation: google.maps.Animation.DROP,
+    });
+
+    // Center map on location
+    mapInstanceRef.current.setCenter({ lat, lng });
+  };
+
+  // Update marker when location or risk changes
+  useEffect(() => {
+    if (apiKey && window.google) {
+      updateMarker();
+    }
+  }, [lat, lng, risk.risk, risk.riskScore, apiKey]);
+
+  const googleMapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
 
   return (
     <div>
@@ -64,17 +167,18 @@ export default function ZoneMap({ risk, latest }) {
         </div>
       </div>
 
-      {/* OpenStreetMap Embed — no API key needed */}
+      {/* Google Maps Embed */}
       <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden mb-6">
-        <iframe
-          title="Sensor Location"
-          src={mapSrc}
-          width="100%"
-          height="420"
-          style={{ border: 0 }}
-          allowFullScreen
-          loading="lazy"
-        />
+        {!apiKey ? (
+          <div className="flex items-center justify-center h-[420px] bg-slate-700">
+            <p className="text-slate-400">Loading map...</p>
+          </div>
+        ) : (
+          <div
+            ref={mapRef}
+            className="w-full h-[420px]"
+          />
+        )}
       </div>
 
       {/* Open in Google Maps button */}

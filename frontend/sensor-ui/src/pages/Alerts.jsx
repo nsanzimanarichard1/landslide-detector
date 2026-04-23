@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MdWarning, MdError, MdAccessTime, MdLocationOn, MdClose } from "react-icons/md";
 import { RISK_CONFIG } from "../components/chartConfig.js";
+import axios from "axios";
 
 const DEFAULT_LAT = -1.9441;
 const DEFAULT_LNG = 30.0619;
@@ -9,6 +10,65 @@ function AlertMapModal({ alert, onClose }) {
   const cfg = RISK_CONFIG[alert.risk];
   const lat = alert.lat ?? DEFAULT_LAT;
   const lng = alert.lng ?? DEFAULT_LNG;
+  const mapRef = useRef(null);
+  const [apiKey, setApiKey] = useState("");
+
+  // Fetch API key from backend
+  useEffect(() => {
+    axios.get("http://localhost:5000/api/config")
+      .then((res) => setApiKey(res.data.googleMapsApiKey || ""))
+      .catch(() => {});
+  }, []);
+
+  // Load Google Maps script
+  useEffect(() => {
+    if (!apiKey) return;
+
+    if (window.google && window.google.maps) {
+      initMap();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
+    script.async = true;
+    script.defer = true;
+    script.onload = initMap;
+    document.head.appendChild(script);
+  }, [apiKey]);
+
+  const initMap = () => {
+    if (!mapRef.current || !window.google) return;
+
+    const map = new google.maps.Map(mapRef.current, {
+      center: { lat, lng },
+      zoom: 15,
+      styles: [
+        { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
+      ],
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: true,
+    });
+
+    // Create marker with risk-based color
+    const markerColor = alert.risk === "CRITICAL" ? "#ef4444" :
+                        alert.risk === "HIGH" ? "#f97316" : "#eab308";
+
+    new google.maps.Marker({
+      position: { lat, lng },
+      map,
+      title: `Risk: ${alert.risk} (Score: ${alert.riskScore})`,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 14,
+        fillColor: markerColor,
+        fillOpacity: 0.9,
+        strokeColor: "#ffffff",
+        strokeWeight: 3,
+      },
+    });
+  };
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-3 md:p-4">
@@ -48,17 +108,15 @@ function AlertMapModal({ alert, onClose }) {
           </div>
         </div>
 
-        {/* Embedded Map — OpenStreetMap, no API key needed */}
+        {/* Google Maps Embed */}
         <div className="rounded-b-2xl overflow-hidden flex-1 min-h-0">
-          <iframe
-            title="Alert Location"
-            src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01},${lat-0.01},${lng+0.01},${lat+0.01}&layer=mapnik&marker=${lat},${lng}`}
-            width="100%"
-            height="100%"
-            style={{ border: 0, minHeight: "280px" }}
-            allowFullScreen
-            loading="lazy"
-          />
+          {!apiKey ? (
+            <div className="flex items-center justify-center h-[280px] bg-slate-700">
+              <p className="text-slate-400">Loading map...</p>
+            </div>
+          ) : (
+            <div ref={mapRef} className="w-full h-[280px]" />
+          )}
         </div>
 
       </div>
